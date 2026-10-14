@@ -1,13 +1,12 @@
-"""
-网卡管理工具 v1.0
-Python GUI 重构版本
-阶段2：接入 Windows 网卡读取
-"""
+"""网卡管理工具 v1.0 - Stage4"""
 
+import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog, messagebox
 
 from network import NetworkAdapterReader
+from network.mac_modifier import MacModifier
+from utils.admin import require_admin
 
 APP_NAME = "网卡管理工具 v1.0"
 
@@ -17,56 +16,52 @@ class MacChangerApp(tk.Tk):
         super().__init__()
         self.title(APP_NAME)
         self.geometry("900x520")
-        self.resizable(False, False)
         self.reader = NetworkAdapterReader()
-        self._build_ui()
+        self.modifier = MacModifier()
+        self.adapters = []
+        self.build()
 
-    def _build_ui(self):
-        top = ttk.Frame(self)
-        top.pack(fill="x", padx=10, pady=10)
+    def build(self):
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=10, pady=10)
+        ttk.Button(bar, text="刷新网卡", command=self.refresh).pack(side="left")
+        ttk.Button(bar, text="修改MAC", command=self.change).pack(side="left")
+        ttk.Button(bar, text="恢复默认", command=self.restore).pack(side="left")
 
-        ttk.Button(top, text="刷新网卡", command=self.refresh_adapters).pack(side="left", padx=5)
-        ttk.Button(top, text="修改MAC").pack(side="left", padx=5)
-        ttk.Button(top, text="恢复默认").pack(side="left", padx=5)
+        self.table = ttk.Treeview(self, columns=("id","description","name","mac","status"), show="headings")
+        for c,t in [("id","编号"),("description","网卡描述"),("name","接口名称"),("mac","当前MAC"),("status","状态")]:
+            self.table.heading(c,text=t)
+            self.table.column(c,width=150)
+        self.table.pack(fill="both",expand=True,padx=10,pady=10)
 
-        columns = ("id", "description", "name", "mac", "status")
-        self.table = ttk.Treeview(self, columns=columns, show="headings")
+    def refresh(self):
+        for i in self.table.get_children():
+            self.table.delete(i)
+        self.adapters = self.reader.get_adapters()
+        for a in self.adapters:
+            self.table.insert("","end",values=(a.get("id"),a.get("description"),a.get("name"),a.get("mac"),a.get("status")))
 
-        headers = {
-            "id": "编号",
-            "description": "网卡描述",
-            "name": "接口名称",
-            "mac": "当前MAC",
-            "status": "状态",
-        }
+    def selected(self):
+        s=self.table.selection()
+        return self.adapters[self.table.index(s[0])] if s else None
 
-        for key, text in headers.items():
-            self.table.heading(key, text=text)
-            self.table.column(key, width=150)
+    def change(self):
+        a=self.selected()
+        if not a:return
+        m=simpledialog.askstring("MAC","输入新的MAC")
+        if m:
+            self.modifier.set_registry_mac(a.get("guid"),m)
+            self.modifier.refresh_adapter(a.get("name"))
+            self.refresh()
 
-        self.table.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.status = ttk.Label(self, text="准备就绪")
-        self.status.pack(fill="x", padx=10, pady=5)
-
-    def refresh_adapters(self):
-        for item in self.table.get_children():
-            self.table.delete(item)
-
-        adapters = self.reader.get_adapters()
-
-        for adapter in adapters:
-            self.table.insert("", "end", values=(
-                adapter["id"],
-                adapter["description"],
-                adapter["name"],
-                adapter["mac"],
-                adapter["status"],
-            ))
-
-        self.status.config(text=f"读取到 {len(adapters)} 个网卡")
+    def restore(self):
+        a=self.selected()
+        if a:
+            self.modifier.restore_mac(a.get("guid"))
+            self.refresh()
 
 
 if __name__ == "__main__":
-    app = MacChangerApp()
-    app.mainloop()
+    if require_admin():
+        sys.exit(0)
+    MacChangerApp().mainloop()
